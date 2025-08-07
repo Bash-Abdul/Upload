@@ -14,11 +14,11 @@ export default function Home() {
         />
         <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
           <li className="mb-2 tracking-[-.01em]">
-            Welcome to upload
+            Welcome to upload.
             <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.js
+              {/* src/app/page.js */}
             </code>
-            .
+          
           </li>
           <li className="tracking-[-.01em]">
             Our all in one event image upload platform
