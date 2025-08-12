@@ -56,6 +56,13 @@ export async function POST(request) {
 
         return NextResponse.json({ event }, { status: 201 })
     } catch (error) {
+        // Handle unique constraint on code
+        if (error.code === 'P2002') {
+            return NextResponse.json(
+                { error: 'Event code already exists. Please generate a new code.' },
+                { status: 409 }
+            )
+        }
         console.error('Error creating event:', error)
         return NextResponse.json(
             { error: 'Failed to create event' },
