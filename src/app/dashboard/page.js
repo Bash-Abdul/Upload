@@ -120,7 +120,7 @@ export default function Dashboard() {
                                     )}
                                     <div className="flex space-x-2">
                                         <Link
-                                            href={`/events/${event.code}`}
+                                            href={`/events/${event.code}/gallery`}
                                             className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
                                         >
                                             View Gallery

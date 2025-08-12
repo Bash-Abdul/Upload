@@ -381,7 +381,7 @@ export default function EventQR() {
 
                     <div className="mt-8 text-center">
                         <button
-                            onClick={() => router.push(`/events/${event.code}`)}
+                            onClick={() => router.push(`/events/${event.code}/gallery`)}
                             className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-md font-medium"
                         >
                             View Event Gallery
