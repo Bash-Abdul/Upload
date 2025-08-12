@@ -14,6 +14,9 @@ export default function UploadPhotos() {
     const [error, setError] = useState('')
     const [success, setSuccess] = useState('')
     const [selectedPhoto, setSelectedPhoto] = useState(null)
+    const [uploadProgress, setUploadProgress] = useState({})
+    const [totalUploads, setTotalUploads] = useState(0)
+    const [completedUploads, setCompletedUploads] = useState(0)
     const params = useParams()
     const eventCode = params.code
 
@@ -52,7 +55,40 @@ export default function UploadPhotos() {
 
     const handleFileSelect = (e) => {
         const files = Array.from(e.target.files)
-        setSelectedFiles(files)
+
+        // File validation
+        const maxFileSize = 10 * 1024 * 1024 // 10MB
+        const maxFiles = 20
+        const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
+
+        // Check file count
+        if (files.length > maxFiles) {
+            setError(`Maximum ${maxFiles} files allowed at once`)
+            return
+        }
+
+        // Check file types and sizes
+        const validFiles = []
+        const invalidFiles = []
+
+        files.forEach(file => {
+            if (!allowedTypes.includes(file.type)) {
+                invalidFiles.push(`${file.name} (invalid file type)`)
+            } else if (file.size > maxFileSize) {
+                invalidFiles.push(`${file.name} (file too large - max 10MB)`)
+            } else {
+                validFiles.push(file)
+            }
+        })
+
+        if (invalidFiles.length > 0) {
+            setError(`Some files were rejected:\n${invalidFiles.join('\n')}`)
+        }
+
+        if (validFiles.length > 0) {
+            setSelectedFiles(validFiles)
+            setError('') // Clear previous errors
+        }
     }
 
     const uploadPhotos = async () => {
@@ -61,43 +97,111 @@ export default function UploadPhotos() {
         setUploading(true)
         setError('')
         setSuccess('')
+        setTotalUploads(selectedFiles.length)
+        setCompletedUploads(0)
+        setUploadProgress({})
 
         try {
-            // Create FormData to send files to our API
-            const formData = new FormData()
+            // Process uploads in batches for better performance
+            const batchSize = 3 // Upload 3 files concurrently
+            const batches = []
 
-            // Add each file
-            selectedFiles.forEach(file => {
-                formData.append('files', file)
-            })
-
-            // Add guest name if provided
-            if (guestName) {
-                formData.append('guestName', guestName)
+            for (let i = 0; i < selectedFiles.length; i += batchSize) {
+                batches.push(selectedFiles.slice(i, i + batchSize))
             }
 
-            // Send to our API endpoint (which uses admin client)
-            const response = await fetch(`/api/events/${eventCode}/photos`, {
-                method: 'POST',
-                body: formData
-            })
+            const allUploadedPhotos = []
 
-            if (!response.ok) {
-                const errorData = await response.json()
-                throw new Error(errorData.error || 'Upload failed')
+            for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+                const batch = batches[batchIndex]
+
+                // Upload batch concurrently
+                const batchPromises = batch.map(async (file, fileIndex) => {
+                    const globalFileIndex = batchIndex * batchSize + fileIndex
+                    const fileId = `${Date.now()}-${globalFileIndex}`
+
+                    try {
+                        // Create FormData for single file
+                        const formData = new FormData()
+                        formData.append('files', file)
+                        if (guestName) {
+                            formData.append('guestName', guestName)
+                        }
+
+                        // Update progress
+                        setUploadProgress(prev => ({
+                            ...prev,
+                            [fileId]: { status: 'uploading', progress: 0 }
+                        }))
+
+                        // Send to API
+                        const response = await fetch(`/api/events/${eventCode}/photos`, {
+                            method: 'POST',
+                            body: formData
+                        })
+
+                        if (!response.ok) {
+                            const errorData = await response.json()
+                            throw new Error(errorData.error || 'Upload failed')
+                        }
+
+                        const result = await response.json()
+
+                        // Update progress to completed
+                        setUploadProgress(prev => ({
+                            ...prev,
+                            [fileId]: { status: 'completed', progress: 100 }
+                        }))
+
+                        setCompletedUploads(prev => prev + 1)
+
+                        if (result.photos && result.photos.length > 0) {
+                            allUploadedPhotos.push(...result.photos)
+                        }
+
+                        return result
+                    } catch (error) {
+                        // Update progress to failed
+                        setUploadProgress(prev => ({
+                            ...prev,
+                            [fileId]: { status: 'failed', progress: 0, error: error.message }
+                        }))
+
+                        setCompletedUploads(prev => prev + 1)
+                        throw error
+                    }
+                })
+
+                // Wait for current batch to complete before starting next
+                await Promise.allSettled(batchPromises)
+
+                // Small delay between batches to prevent overwhelming the server
+                if (batchIndex < batches.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 200))
+                }
             }
 
-            const result = await response.json()
-            setSuccess(result.message)
-            setSelectedFiles([])
-            setGuestName('')
+            // Check if any uploads succeeded
+            if (allUploadedPhotos.length > 0) {
+                setSuccess(`Successfully uploaded ${allUploadedPhotos.length} photo(s)!`)
+                setSelectedFiles([])
+                setGuestName('')
 
-            // Refresh photos
-            fetchPhotos()
+                // Refresh photos
+                fetchPhotos()
+            } else {
+                setError('No photos were uploaded successfully')
+            }
         } catch (error) {
-            setError(error.message)
+            setError(`Upload failed: ${error.message}`)
         } finally {
             setUploading(false)
+            // Clear progress after a delay
+            setTimeout(() => {
+                setUploadProgress({})
+                setTotalUploads(0)
+                setCompletedUploads(0)
+            }, 3000)
         }
     }
 
@@ -209,9 +313,12 @@ export default function UploadPhotos() {
                                 onChange={handleFileSelect}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
-                            <p className="text-sm text-gray-500 mt-1">
-                                You can select multiple photos at once
-                            </p>
+                            <div className="mt-2 text-xs text-gray-500 space-y-1">
+                                <p>• You can select up to 20 photos at once</p>
+                                <p>• Maximum file size: 10MB per photo</p>
+                                <p>• Supported formats: JPEG, PNG, GIF, WebP</p>
+                                <p>• Photos are uploaded in batches for better performance</p>
+                            </div>
                         </div>
 
                         {selectedFiles.length > 0 && (
@@ -234,6 +341,48 @@ export default function UploadPhotos() {
                         >
                             {uploading ? 'Uploading...' : `Upload ${selectedFiles.length} Photo(s)`}
                         </button>
+
+                        {/* Upload Progress */}
+                        {uploading && (
+                            <div className="mt-4 space-y-3">
+                                <div className="flex justify-between text-sm text-gray-600">
+                                    <span>Overall Progress</span>
+                                    <span>{completedUploads} / {totalUploads}</span>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                    <div
+                                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                                        style={{ width: `${totalUploads > 0 ? (completedUploads / totalUploads) * 100 : 0}%` }}
+                                    ></div>
+                                </div>
+
+                                {/* Individual File Progress */}
+                                {Object.entries(uploadProgress).map(([fileId, progress]) => (
+                                    <div key={fileId} className="flex items-center space-x-3 text-sm">
+                                        <div className="flex-1 bg-gray-200 rounded-full h-1.5">
+                                            <div
+                                                className={`h-1.5 rounded-full transition-all duration-300 ${progress.status === 'completed' ? 'bg-green-500' :
+                                                    progress.status === 'failed' ? 'bg-red-500' :
+                                                        'bg-blue-500'
+                                                    }`}
+                                                style={{ width: `${progress.progress}%` }}
+                                            ></div>
+                                        </div>
+                                        <span className={`text-xs ${progress.status === 'completed' ? 'text-green-600' :
+                                            progress.status === 'failed' ? 'text-red-600' :
+                                                'text-blue-600'
+                                            }`}>
+                                            {progress.status === 'completed' ? '✓' :
+                                                progress.status === 'failed' ? '✗' :
+                                                    '⏳'}
+                                        </span>
+                                        {progress.status === 'failed' && (
+                                            <span className="text-xs text-red-600">{progress.error}</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </div>
 
